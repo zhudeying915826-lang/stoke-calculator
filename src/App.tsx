@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { 
   Calculator, 
   TrendingUp, 
@@ -9,7 +9,10 @@ import {
   BarChart3,
   DollarSign,
   ShieldAlert,
-  ChevronDown
+  ChevronDown,
+  RotateCcw,
+  Settings,
+  Target
 } from 'lucide-react';
 
 // 交易模式
@@ -17,8 +20,8 @@ type TradeMode = 'stock' | 'futures';
 type TDirection = 'buy_first' | 'sell_first';
 type FuturesDirection = 'long' | 'short';
 
-// 期货合约配置
-const FUTURES_CONTRACTS = [
+// 默认期货合约配置
+const DEFAULT_FUTURES_CONTRACTS = [
   { code: 'IF', name: '沪深300股指', multiplier: 300, marginRate: 0.12, minPriceUnit: 0.2, exchange: 'CFFEX' },
   { code: 'IC', name: '中证500股指', multiplier: 200, marginRate: 0.12, minPriceUnit: 0.2, exchange: 'CFFEX' },
   { code: 'IH', name: '上证50股指', multiplier: 300, marginRate: 0.12, minPriceUnit: 0.2, exchange: 'CFFEX' },
@@ -29,47 +32,46 @@ const FUTURES_CONTRACTS = [
   { code: 'AG', name: '白银', multiplier: 15, marginRate: 0.12, minPriceUnit: 1, exchange: 'SHFE' },
   { code: 'C', name: '玉米', multiplier: 10, marginRate: 0.08, minPriceUnit: 1, exchange: 'DCE' },
   { code: 'M', name: '豆粕', multiplier: 10, marginRate: 0.08, minPriceUnit: 1, exchange: 'DCE' },
-  { code: 'SR', name: '白糖', multiplier: 10, marginRate: 0.07, minPriceUnit: 1, exchange: 'CZCE' },
-  { code: 'CF', name: '棉花', multiplier: 5, marginRate: 0.07, minPriceUnit: 5, exchange: 'CZCE' },
   { code: 'SC', name: '原油', multiplier: 1000, marginRate: 0.10, minPriceUnit: 0.1, exchange: 'INE' },
 ];
 
-// 结果类型
-interface StockResult {
-  profit: number;
-  profitRate: number;
-  buyCost: number;
-  sellCost: number;
-  totalCost: number;
-  netProfit: number;
+// 费率设置类型
+interface FeeSettings {
+  commissionRate: number;      // 佣金费率（万分之几）
+  minCommission: number;       // 最低佣金
+  stampDutyRate: number;       // 印花税率（万分之几）
+  transferFeeRate: number;     // 过户费率（万分之几）
 }
 
-interface TResult {
-  originalCost: number;
-  newCost: number;
-  costReduction: number;
-  realizedProfit: number;
-  totalQuantity: number;
-}
-
-interface FuturesResult {
-  margin: number;
-  maxLots: number;
-  liquidationPrice: number;
-  pricePerTick: number;
-  riskLevel: 'low' | 'medium' | 'high' | 'extreme';
+// 期货合约类型
+interface FuturesContract {
+  code: string;
+  name: string;
+  multiplier: number;
+  marginRate: number;
+  minPriceUnit: number;
+  exchange: string;
 }
 
 export default function App() {
   // 全局模式
   const [mode, setMode] = useState<TradeMode>('stock');
   const [activeTab, setActiveTab] = useState<'basic' | 't'>('basic');
+  const [showFeeSettings, setShowFeeSettings] = useState(false);
+
+  // 股票费率设置（默认万3佣金，千1印花税，万0.1过户费）
+  const [feeSettings, setFeeSettings] = useState<FeeSettings>({
+    commissionRate: 3,
+    minCommission: 5,
+    stampDutyRate: 10,
+    transferFeeRate: 0.1
+  });
 
   // 股票基础
-  const [stockBuyPrice, setStockBuyPrice] = useState('');
-  const [stockSellPrice, setStockSellPrice] = useState('');
-  const [stockQuantity, setStockQuantity] = useState('');
-  const [stockResult, setStockResult] = useState<StockResult | null>(null);
+  const [stockBuyPrice, setStockBuyPrice] = useState<string>('');
+  const [stockBuyQty, setStockBuyQty] = useState<string>('100');
+  const [stockSellPrice, setStockSellPrice] = useState<string>('');
+  const [stockSellQty, setStockSellQty] = useState<string>('100');
 
   // 做T
   const [tDirection, setTDirection] = useState<TDirection>('buy_first');
@@ -78,59 +80,102 @@ export default function App() {
   const [tPrice, setTPrice] = useState('');
   const [tQty, setTQty] = useState('');
   const [tSellPrice, setTSellPrice] = useState('');
-  const [tResult, setTResult] = useState<TResult | null>(null);
 
   // 期货
-  const [selectedContract, setSelectedContract] = useState(FUTURES_CONTRACTS[0]);
+  const [futuresContracts, setFuturesContracts] = useState<FuturesContract[]>(DEFAULT_FUTURES_CONTRACTS);
+  const [selectedContractCode, setSelectedContractCode] = useState('IF');
   const [futuresPrice, setFuturesPrice] = useState('');
-  const [futuresLots, setFuturesLots] = useState('');
+  const [futuresLots, setFuturesLots] = useState('1');
   const [availableFunds, setAvailableFunds] = useState('');
   const [futuresDirection, setFuturesDirection] = useState<FuturesDirection>('long');
   const [maintenanceMargin, setMaintenanceMargin] = useState(0.08);
-  const [futuresResult, setFuturesResult] = useState<FuturesResult | null>(null);
+  const [showContractEditor, setShowContractEditor] = useState(false);
 
-  // 计算股票基础盈亏
-  const calculateStock = () => {
-    const buy = parseFloat(stockBuyPrice);
-    const sell = parseFloat(stockSellPrice);
-    const qty = parseInt(stockQuantity);
-    if (!buy || !sell || !qty) return;
+  const selectedContract = useMemo(() => 
+    futuresContracts.find(c => c.code === selectedContractCode) || futuresContracts[0],
+    [futuresContracts, selectedContractCode]
+  );
 
-    const commissionRate = 0.0003;
-    const stampDutyRate = 0.001;
-    const transferFeeRate = 0.00001;
+  // 计算股票成本明细和保本价
+  const stockCalculation = useMemo(() => {
+    const buyPrice = parseFloat(stockBuyPrice) || 0;
+    const buyQty = parseInt(stockBuyQty) || 0;
+    const sellPrice = parseFloat(stockSellPrice) || 0;
+    const sellQty = parseInt(stockSellQty) || 0;
 
-    const buyAmount = buy * qty;
-    const sellAmount = sell * qty;
-    const buyCommission = Math.max(buyAmount * commissionRate, 5);
-    const sellCommission = Math.max(sellAmount * commissionRate, 5);
-    const stampDuty = sellAmount * stampDutyRate;
-    const transferFee = (buyAmount + sellAmount) * transferFeeRate;
+    if (!buyPrice || !buyQty) return null;
 
-    const buyCost = buyCommission + transferFee / 2;
-    const sellCost = sellCommission + stampDuty + transferFee / 2;
-    const totalCost = buyCost + sellCost;
-    const grossProfit = sellAmount - buyAmount;
-    const netProfit = grossProfit - totalCost;
+    // 买入成本计算
+    const buyAmount = buyPrice * buyQty;
+    const buyCommission = Math.max(buyAmount * (feeSettings.commissionRate / 10000), feeSettings.minCommission);
+    const buyTransferFee = buyAmount * (feeSettings.transferFeeRate / 10000);
+    const buyTotalCost = buyCommission + buyTransferFee;
+    const buyNetCost = buyAmount + buyTotalCost;
 
-    setStockResult({
-      profit: grossProfit,
-      profitRate: (netProfit / buyAmount) * 100,
-      buyCost,
-      sellCost,
-      totalCost,
-      netProfit
-    });
-  };
+    // 保本价计算（卖出要覆盖所有成本）
+    // 保本公式：卖出价 = (买入总成本 + 卖出最低佣金 + 卖出过户费) / (数量 * (1 - 佣金率 - 印花税率 - 过户费率))
+    // 简化计算：考虑卖出时的税费
+    const sellCommissionRate = feeSettings.commissionRate / 10000;
+    const stampDutyRate = feeSettings.stampDutyRate / 10000;
+    const transferRate = feeSettings.transferFeeRate / 10000;
+    
+    // 分母：(1 - 卖出佣金率 - 印花税率 - 过户费率)
+    const denominator = 1 - sellCommissionRate - stampDutyRate - transferRate;
+    // 分子：买入总成本 + 卖出最低佣金（假设先按最低算）
+    let breakEvenPrice = 0;
+    if (denominator > 0) {
+      breakEvenPrice = (buyNetCost + feeSettings.minCommission) / (buyQty * denominator);
+    }
+
+    // 如果有卖出价格，计算盈亏
+    let sellCalculation = null;
+    if (sellPrice && sellQty) {
+      const sellAmount = sellPrice * sellQty;
+      const sellCommission = Math.max(sellAmount * sellCommissionRate, feeSettings.minCommission);
+      const sellStampDuty = sellAmount * stampDutyRate;
+      const sellTransferFee = sellAmount * transferRate;
+      const sellTotalCost = sellCommission + sellStampDuty + sellTransferFee;
+      const sellNetIncome = sellAmount - sellTotalCost;
+
+      const grossProfit = sellAmount - buyAmount;
+      const totalFee = buyTotalCost + sellTotalCost;
+      const netProfit = sellNetIncome - buyNetCost;
+      const profitRate = buyNetCost > 0 ? (netProfit / buyNetCost) * 100 : 0;
+
+      sellCalculation = {
+        sellAmount,
+        sellCommission,
+        sellStampDuty,
+        sellTransferFee,
+        sellTotalCost,
+        sellNetIncome,
+        grossProfit,
+        totalFee,
+        netProfit,
+        profitRate
+      };
+    }
+
+    return {
+      buyAmount,
+      buyCommission,
+      buyTransferFee,
+      buyTotalCost,
+      buyNetCost,
+      breakEvenPrice,
+      sellCalculation
+    };
+  }, [stockBuyPrice, stockBuyQty, stockSellPrice, stockSellQty, feeSettings]);
 
   // 计算做T
-  const calculateT = () => {
+  const tCalculation = useMemo(() => {
     const origCost = parseFloat(originalCost);
     const origQty = parseInt(originalQty);
     const tP = parseFloat(tPrice);
     const tQ = parseInt(tQty);
     const sellP = parseFloat(tSellPrice);
-    if (!origCost || !origQty || !tP || !tQ) return;
+    
+    if (!origCost || !origQty || !tP || !tQ) return null;
 
     let realizedProfit = 0;
     let newTotalCost = origCost * origQty;
@@ -154,28 +199,29 @@ export default function App() {
       }
     }
 
-    setTResult({
+    return {
       originalCost: origCost,
       newCost: newTotalQty > 0 ? newTotalCost / newTotalQty : 0,
       costReduction: origCost - (newTotalQty > 0 ? newTotalCost / newTotalQty : 0),
       realizedProfit,
       totalQuantity: newTotalQty
-    });
-  };
+    };
+  }, [originalCost, originalQty, tPrice, tQty, tSellPrice, tDirection]);
 
   // 计算期货
-  const calculateFutures = () => {
-    const price = parseFloat(futuresPrice);
-    const lots = parseInt(futuresLots) || 1;
-    const funds = parseFloat(availableFunds);
-    if (!price) return;
+  const futuresCalculation = useMemo(() => {
+    const price = parseFloat(futuresPrice) || 0;
+    const lots = parseInt(futuresLots) || 0;
+    const funds = parseFloat(availableFunds) || 0;
+
+    if (!price) return null;
 
     const { multiplier, marginRate, minPriceUnit } = selectedContract;
     const margin = price * multiplier * lots * marginRate;
     const maxLots = funds ? Math.floor(funds / (price * multiplier * marginRate)) : 0;
     
     let liquidationPrice = 0;
-    if (funds) {
+    if (funds && lots > 0) {
       const maintMargin = price * multiplier * lots * maintenanceMargin;
       const buffer = funds - maintMargin;
       if (futuresDirection === 'long') {
@@ -191,46 +237,53 @@ export default function App() {
     else if (utilization > 50) riskLevel = 'high';
     else if (utilization > 30) riskLevel = 'medium';
 
-    setFuturesResult({
+    return {
       margin,
       maxLots,
       liquidationPrice: liquidationPrice > 0 ? liquidationPrice : 0,
       pricePerTick: minPriceUnit * multiplier,
-      riskLevel
+      riskLevel,
+      utilization
+    };
+  }, [futuresPrice, futuresLots, availableFunds, selectedContract, futuresDirection, maintenanceMargin]);
+
+  // 重置股票
+  const resetStock = () => {
+    setStockBuyPrice('');
+    setStockBuyQty('100');
+    setStockSellPrice('');
+    setStockSellQty('100');
+  };
+
+  // 重置费率
+  const resetFees = () => {
+    setFeeSettings({
+      commissionRate: 3,
+      minCommission: 5,
+      stampDutyRate: 10,
+      transferFeeRate: 0.1
     });
   };
 
-  // 自动计算
-  useEffect(() => {
-    if (mode === 'stock' && activeTab === 'basic' && stockBuyPrice && stockSellPrice && stockQuantity) {
-      calculateStock();
-    }
-  }, [stockBuyPrice, stockSellPrice, stockQuantity]);
-
-  useEffect(() => {
-    if (mode === 'stock' && activeTab === 't' && originalCost && originalQty && tPrice && tQty) {
-      calculateT();
-    }
-  }, [originalCost, originalQty, tPrice, tQty, tSellPrice, tDirection]);
-
-  useEffect(() => {
-    if (mode === 'futures' && futuresPrice) {
-      calculateFutures();
-    }
-  }, [futuresPrice, futuresLots, availableFunds, selectedContract, futuresDirection, maintenanceMargin]);
+  // 更新合约参数
+  const updateContract = (code: string, updates: Partial<FuturesContract>) => {
+    setFuturesContracts(prev => prev.map(c => 
+      c.code === code ? { ...c, ...updates } : c
+    ));
+  };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-4 md:p-6">
-      <div className="max-w-4xl mx-auto space-y-6">
+    <div className="min-h-screen bg-slate-50 p-4 md:p-6">
+      <div className="max-w-6xl mx-auto space-y-6">
         {/* 头部 */}
-        <div className="flex flex-col md:flex-row justify-between items-center bg-white rounded-2xl shadow-lg p-6 border border-slate-200">
+        <div className="flex flex-col md:flex-row justify-between items-center bg-white rounded-2xl shadow-sm p-6 border border-slate-200">
           <div className="flex items-center gap-3 mb-4 md:mb-0">
             <div className="p-3 bg-blue-600 rounded-xl">
               <Calculator className="w-8 h-8 text-white" />
             </div>
             <div>
               <h1 className="text-2xl font-bold text-slate-900">专业交易计算器</h1>
-              <p className="text-slate-500 text-sm">v2.0 - 股票·期货全能版</p>
+              <p className="text-slate-500 text-sm">股票·期货全能版</p>
             </div>
           </div>
           
@@ -238,7 +291,7 @@ export default function App() {
             <button
               onClick={() => setMode('stock')}
               className={`flex items-center gap-2 px-6 py-3 rounded-lg font-medium transition-all ${
-                mode === 'stock' ? 'bg-white text-blue-600 shadow-md' : 'text-slate-600'
+                mode === 'stock' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-600'
               }`}
             >
               <TrendingUp className="w-5 h-5" />
@@ -247,7 +300,7 @@ export default function App() {
             <button
               onClick={() => setMode('futures')}
               className={`flex items-center gap-2 px-6 py-3 rounded-lg font-medium transition-all ${
-                mode === 'futures' ? 'bg-white text-purple-600 shadow-md' : 'text-slate-600'
+                mode === 'futures' ? 'bg-white text-purple-600 shadow-sm' : 'text-slate-600'
               }`}
             >
               <BarChart3 className="w-5 h-5" />
@@ -258,241 +311,420 @@ export default function App() {
 
         {mode === 'stock' ? (
           <div className="space-y-6">
-            {/* 股票内页切换 */}
+            {/* 内页切换 */}
             <div className="flex justify-center">
               <div className="inline-flex bg-white p-1 rounded-xl shadow-sm border border-slate-200">
                 <button
                   onClick={() => setActiveTab('basic')}
                   className={`px-6 py-2 rounded-lg font-medium transition-all ${
-                    activeTab === 'basic' ? 'bg-blue-100 text-blue-700' : 'text-slate-600 hover:text-slate-900'
+                    activeTab === 'basic' ? 'bg-blue-100 text-blue-700' : 'text-slate-600'
                   }`}
                 >
-                  基础盈亏
+                  基础盈亏计算
                 </button>
                 <button
                   onClick={() => setActiveTab('t')}
                   className={`px-6 py-2 rounded-lg font-medium transition-all ${
-                    activeTab === 't' ? 'bg-blue-100 text-blue-700' : 'text-slate-600 hover:text-slate-900'
+                    activeTab === 't' ? 'bg-blue-100 text-blue-700' : 'text-slate-600'
                   }`}
                 >
-                  做T成本
+                  做T成本计算
                 </button>
               </div>
             </div>
 
             {activeTab === 'basic' ? (
-              <div className="bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden">
-                <div className="bg-gradient-to-r from-blue-600 to-blue-700 p-6 text-white">
-                  <h2 className="text-xl font-bold flex items-center gap-2">
-                    <DollarSign className="w-6 h-6" />
-                    股票盈亏计算
-                  </h2>
-                  <p className="text-blue-100 text-sm mt-1">自动计算手续费、印花税、过户费</p>
-                </div>
-                
-                <div className="p-6 space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium text-slate-700">买入价格 (元)</label>
-                      <input
-                        type="number"
-                        value={stockBuyPrice}
-                        onChange={(e) => setStockBuyPrice(e.target.value)}
-                        className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition-all"
-                        placeholder="10.00"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium text-slate-700">卖出价格 (元)</label>
-                      <input
-                        type="number"
-                        value={stockSellPrice}
-                        onChange={(e) => setStockSellPrice(e.target.value)}
-                        className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition-all"
-                        placeholder="11.00"
-                      />
-                    </div>
-                  </div>
-                  
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-slate-700">交易数量 (股)</label>
-                    <input
-                      type="number"
-                      value={stockQuantity}
-                      onChange={(e) => setStockQuantity(e.target.value)}
-                      className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition-all"
-                      placeholder="1000"
-                      step="100"
-                    />
-                  </div>
-
-                  {stockResult && (
-                    <div className="mt-6 space-y-4 animate-in fade-in slide-in-from-bottom-4">
-                      <div className={`p-6 rounded-2xl ${stockResult.netProfit >= 0 ? 'bg-red-50 border-2 border-red-200' : 'bg-green-50 border-2 border-green-200'}`}>
-                        <div className="flex justify-between items-center">
-                          <div>
-                            <div className="text-sm text-slate-600 mb-1">净盈亏</div>
-                            <div className={`text-4xl font-bold ${stockResult.netProfit >= 0 ? 'text-red-600' : 'text-green-600'}`}>
-                              {stockResult.netProfit >= 0 ? '+' : ''}{stockResult.netProfit.toFixed(2)}
-                            </div>
+              <div className="space-y-6">
+                {/* 参数输入区 - 参考图片风格 */}
+                <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                  <div className="p-6 space-y-6">
+                    {/* 买入卖出参数 */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                      {/* 买入参数 */}
+                      <div className="space-y-4">
+                        <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                          <TrendingDown className="w-5 h-5 text-green-600" />
+                          买入参数
+                        </h3>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                            <label className="text-sm font-medium text-slate-700">买入价格 (元)</label>
+                            <input
+                              type="number"
+                              value={stockBuyPrice}
+                              onChange={(e) => setStockBuyPrice(e.target.value)}
+                              className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition-all"
+                              placeholder="0.00"
+                            />
                           </div>
-                          <div className="text-right">
-                            <div className="text-sm text-slate-600 mb-1">收益率</div>
-                            <div className={`text-2xl font-bold ${stockResult.profitRate >= 0 ? 'text-red-600' : 'text-green-600'}`}>
-                              {stockResult.profitRate >= 0 ? '+' : ''}{stockResult.profitRate.toFixed(2)}%
-                            </div>
+                          <div className="space-y-2">
+                            <label className="text-sm font-medium text-slate-700">买入数量 (股)</label>
+                            <input
+                              type="number"
+                              value={stockBuyQty}
+                              onChange={(e) => setStockBuyQty(e.target.value)}
+                              className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition-all"
+                              placeholder="100"
+                              step="100"
+                            />
                           </div>
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-3 gap-3 text-sm">
-                        <div className="bg-slate-50 p-4 rounded-xl text-center">
-                          <div className="text-slate-500 mb-1">买入成本</div>
-                          <div className="font-bold text-slate-700">{stockResult.buyCost.toFixed(2)}</div>
+                      {/* 卖出参数 */}
+                      <div className="space-y-4">
+                        <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                          <TrendingUp className="w-5 h-5 text-red-600" />
+                          卖出参数
+                        </h3>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                            <label className="text-sm font-medium text-slate-700">卖出价格 (元)</label>
+                            <input
+                              type="number"
+                              value={stockSellPrice}
+                              onChange={(e) => setStockSellPrice(e.target.value)}
+                              className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition-all"
+                              placeholder="0.00"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <label className="text-sm font-medium text-slate-700">卖出数量 (股)</label>
+                            <input
+                              type="number"
+                              value={stockSellQty}
+                              onChange={(e) => setStockSellQty(e.target.value)}
+                              className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition-all"
+                              placeholder="100"
+                              step="100"
+                            />
+                          </div>
                         </div>
-                        <div className="bg-slate-50 p-4 rounded-xl text-center">
-                          <div className="text-slate-500 mb-1">卖出成本</div>
-                          <div className="font-bold text-slate-700">{stockResult.sellCost.toFixed(2)}</div>
-                        </div>
-                        <div className="bg-slate-50 p-4 rounded-xl text-center">
-                          <div className="text-slate-500 mb-1">总费用</div>
-                          <div className="font-bold text-slate-700">{stockResult.totalCost.toFixed(2)}</div>
-                        </div>
+                      </div>
+                    </div>
+
+                    <div className="h-px bg-slate-200" />
+
+                    {/* 费率设置 */}
+                    <div className="space-y-4">
+                      <div className="flex justify-between items-center">
+                        <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                          <Settings className="w-5 h-5 text-slate-600" />
+                          费率设置
+                        </h3>
+                        <button 
+                          onClick={resetFees}
+                          className="flex items-center gap-1 text-sm text-slate-500 hover:text-blue-600 transition-colors"
+                        >
+                          <RotateCcw className="w-4 h-4" />
+                          重置参数
+                        </button>
                       </div>
                       
-                      <div className="text-xs text-slate-400 text-center">
-                        佣金: 万3(最低5元) | 印花税: 千1(卖出) | 过户费: 万0.1
+                      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        <div className="space-y-2">
+                          <label className="text-xs font-medium text-slate-600">佣金费率 (‱)</label>
+                          <input
+                            type="number"
+                            step="0.1"
+                            value={feeSettings.commissionRate}
+                            onChange={(e) => setFeeSettings({...feeSettings, commissionRate: parseFloat(e.target.value) || 0})}
+                            className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:border-blue-500 outline-none text-sm"
+                          />
+                          <p className="text-xs text-slate-400">默认万分之{feeSettings.commissionRate}</p>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-xs font-medium text-slate-600">最低佣金 (元)</label>
+                          <input
+                            type="number"
+                            value={feeSettings.minCommission}
+                            onChange={(e) => setFeeSettings({...feeSettings, minCommission: parseFloat(e.target.value) || 0})}
+                            className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:border-blue-500 outline-none text-sm"
+                          />
+                          <p className="text-xs text-slate-400">默认{feeSettings.minCommission}元</p>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-xs font-medium text-slate-600">印花税率 (‱)</label>
+                          <input
+                            type="number"
+                            step="0.1"
+                            value={feeSettings.stampDutyRate}
+                            onChange={(e) => setFeeSettings({...feeSettings, stampDutyRate: parseFloat(e.target.value) || 0})}
+                            className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:border-blue-500 outline-none text-sm"
+                          />
+                          <p className="text-xs text-slate-400">卖出时收取，默认万分之{feeSettings.stampDutyRate}</p>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-xs font-medium text-slate-600">过户费率 (‱)</label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={feeSettings.transferFeeRate}
+                            onChange={(e) => setFeeSettings({...feeSettings, transferFeeRate: parseFloat(e.target.value) || 0})}
+                            className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:border-blue-500 outline-none text-sm"
+                          />
+                          <p className="text-xs text-slate-400">默认万分之{feeSettings.transferFeeRate}</p>
+                        </div>
                       </div>
                     </div>
-                  )}
+                  </div>
                 </div>
+
+                {/* 结果显示区 - 三栏布局参考图片 */}
+                {stockCalculation && (
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    {/* 买入成本明细 */}
+                    <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                      <div className="bg-green-50 p-4 border-b border-green-100">
+                        <h3 className="font-bold text-green-800 flex items-center gap-2">
+                          <TrendingDown className="w-5 h-5" />
+                          买入成本明细
+                        </h3>
+                      </div>
+                      <div className="p-4 space-y-3">
+                        <div className="flex justify-between text-sm">
+                          <span className="text-slate-600">买入金额</span>
+                          <span className="font-medium">¥{stockCalculation.buyAmount.toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between text-sm">
+                          <span className="text-slate-600">买入佣金</span>
+                          <span className="font-medium text-red-600">-¥{stockCalculation.buyCommission.toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between text-sm">
+                          <span className="text-slate-600">过户费</span>
+                          <span className="font-medium text-red-600">-¥{stockCalculation.buyTransferFee.toFixed(2)}</span>
+                        </div>
+                        <div className="h-px bg-slate-200 my-2" />
+                        <div className="flex justify-between font-bold text-green-700">
+                          <span>买入总成本</span>
+                          <span>¥{stockCalculation.buyNetCost.toFixed(2)}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 卖出收入明细 */}
+                    <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                      <div className="bg-red-50 p-4 border-b border-red-100">
+                        <h3 className="font-bold text-red-800 flex items-center gap-2">
+                          <TrendingUp className="w-5 h-5" />
+                          卖出收入明细
+                        </h3>
+                      </div>
+                      <div className="p-4 space-y-3">
+                        {stockCalculation.sellCalculation ? (
+                          <>
+                            <div className="flex justify-between text-sm">
+                              <span className="text-slate-600">卖出金额</span>
+                              <span className="font-medium">¥{stockCalculation.sellCalculation.sellAmount.toFixed(2)}</span>
+                            </div>
+                            <div className="flex justify-between text-sm">
+                              <span className="text-slate-600">卖出佣金</span>
+                              <span className="font-medium text-red-600">-¥{stockCalculation.sellCalculation.sellCommission.toFixed(2)}</span>
+                            </div>
+                            <div className="flex justify-between text-sm">
+                              <span className="text-slate-600">印花税</span>
+                              <span className="font-medium text-red-600">-¥{stockCalculation.sellCalculation.sellStampDuty.toFixed(2)}</span>
+                            </div>
+                            <div className="flex justify-between text-sm">
+                              <span className="text-slate-600">过户费</span>
+                              <span className="font-medium text-red-600">-¥{stockCalculation.sellCalculation.sellTransferFee.toFixed(2)}</span>
+                            </div>
+                            <div className="h-px bg-slate-200 my-2" />
+                            <div className="flex justify-between font-bold text-red-700">
+                              <span>卖出净收入</span>
+                              <span>¥{stockCalculation.sellCalculation.sellNetIncome.toFixed(2)}</span>
+                            </div>
+                          </>
+                        ) : (
+                          <div className="text-center text-slate-400 py-8 text-sm">
+                            输入卖出价格查看明细
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* 盈亏分析 */}
+                    <div className="bg-white rounded-2xl shadow-sm border-2 border-red-200 overflow-hidden">
+                      <div className="bg-red-100 p-4 border-b border-red-200">
+                        <h3 className="font-bold text-red-800">盈亏分析</h3>
+                      </div>
+                      <div className="p-4 space-y-3">
+                        {stockCalculation.sellCalculation ? (
+                          <>
+                            <div className="flex justify-between text-sm">
+                              <span className="text-slate-600">毛盈亏</span>
+                              <span className={`font-medium ${stockCalculation.sellCalculation.grossProfit >= 0 ? 'text-red-600' : 'text-green-600'}`}>
+                                {stockCalculation.sellCalculation.grossProfit >= 0 ? '+' : ''}¥{stockCalculation.sellCalculation.grossProfit.toFixed(2)}
+                              </span>
+                            </div>
+                            <div className="flex justify-between text-sm">
+                              <span className="text-slate-600">总交易费用</span>
+                              <span className="font-medium text-green-600">-¥{stockCalculation.sellCalculation.totalFee.toFixed(2)}</span>
+                            </div>
+                            <div className="h-px bg-slate-200 my-2" />
+                            <div className="flex justify-between items-center">
+                              <span className="font-bold text-slate-800">净利润</span>
+                              <span className={`text-2xl font-bold ${stockCalculation.sellCalculation.netProfit >= 0 ? 'text-red-600' : 'text-green-600'}`}>
+                                {stockCalculation.sellCalculation.netProfit >= 0 ? '+' : ''}¥{stockCalculation.sellCalculation.netProfit.toFixed(2)}
+                              </span>
+                            </div>
+                            <div className="flex justify-between text-sm mt-2">
+                              <span className="text-slate-600">收益率</span>
+                              <span className={`font-bold ${stockCalculation.sellCalculation.profitRate >= 0 ? 'text-red-600' : 'text-green-600'}`}>
+                                {stockCalculation.sellCalculation.profitRate >= 0 ? '+' : ''}{stockCalculation.sellCalculation.profitRate.toFixed(2)}%
+                              </span>
+                            </div>
+                          </>
+                        ) : (
+                          <div className="space-y-3">
+                            <div className="flex justify-between text-sm text-slate-400">
+                              <span>毛盈亏</span>
+                              <span>+¥0.00</span>
+                            </div>
+                            <div className="flex justify-between text-sm text-slate-400">
+                              <span>总交易费用</span>
+                              <span>-¥0.00</span>
+                            </div>
+                            <div className="h-px bg-slate-200 my-2" />
+                            <div className="text-center text-slate-400 py-2">
+                              输入卖出价格查看盈亏
+                            </div>
+                          </div>
+                        )}
+                        
+                        {/* 保本价提示 */}
+                        <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
+                          <div className="flex items-center gap-2 mb-1">
+                            <Target className="w-4 h-4 text-blue-600" />
+                            <span className="text-sm font-medium text-blue-800">保本价提示</span>
+                          </div>
+                          <div className="text-2xl font-bold text-blue-700">
+                            ¥{stockCalculation.breakEvenPrice.toFixed(2)}
+                          </div>
+                          <p className="text-xs text-blue-600 mt-1">
+                            卖出价格 ≥ 此价格可盈利（考虑所有费用）
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
-              <div className="bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden">
+              // 做T计算器
+              <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
                 <div className="bg-gradient-to-r from-indigo-600 to-indigo-700 p-6 text-white">
                   <h2 className="text-xl font-bold flex items-center gap-2">
                     <Activity className="w-6 h-6" />
                     做T成本计算器
                   </h2>
-                  <p className="text-indigo-100 text-sm mt-1">支持先买后卖、先卖后买两种模式</p>
                 </div>
 
-                <div className="p-6 space-y-4">
-                  <div className="flex gap-2 p-1 bg-slate-100 rounded-xl">
+                <div className="p-6 space-y-6">
+                  <div className="flex gap-2 p-1 bg-slate-100 rounded-xl w-fit">
                     <button
                       onClick={() => setTDirection('buy_first')}
-                      className={`flex-1 py-3 px-4 rounded-lg text-sm font-medium transition-all ${
+                      className={`flex items-center gap-2 px-6 py-2 rounded-lg font-medium transition-all ${
                         tDirection === 'buy_first' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-600'
                       }`}
                     >
+                      <TrendingDown className="w-4 h-4" />
                       先买后卖
                     </button>
                     <button
                       onClick={() => setTDirection('sell_first')}
-                      className={`flex-1 py-3 px-4 rounded-lg text-sm font-medium transition-all ${
+                      className={`flex items-center gap-2 px-6 py-2 rounded-lg font-medium transition-all ${
                         tDirection === 'sell_first' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-600'
                       }`}
                     >
+                      <TrendingUp className="w-4 h-4" />
                       先卖后买
                     </button>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium text-slate-700">原持仓成本 (元)</label>
-                      <input
-                        type="number"
-                        value={originalCost}
-                        onChange={(e) => setOriginalCost(e.target.value)}
-                        className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none"
-                        placeholder="10.00"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium text-slate-700">原持仓数量 (股)</label>
-                      <input
-                        type="number"
-                        value={originalQty}
-                        onChange={(e) => setOriginalQty(e.target.value)}
-                        className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none"
-                        placeholder="1000"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="h-px bg-slate-200 my-4" />
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium text-slate-700">
-                        {tDirection === 'buy_first' ? '买入价格' : '卖出价格'} (元)
-                      </label>
-                      <input
-                        type="number"
-                        value={tPrice}
-                        onChange={(e) => setTPrice(e.target.value)}
-                        className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none"
-                        placeholder="9.80"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium text-slate-700">做T数量 (股)</label>
-                      <input
-                        type="number"
-                        value={tQty}
-                        onChange={(e) => setTQty(e.target.value)}
-                        className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none"
-                        placeholder="500"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-slate-700">
-                      {tDirection === 'buy_first' ? '卖出价格' : '买入价格'} (元) [可选]
-                    </label>
-                    <input
-                      type="number"
-                      value={tSellPrice}
-                      onChange={(e) => setTSellPrice(e.target.value)}
-                      className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none"
-                      placeholder="完成做T的对应价格"
-                    />
-                  </div>
-
-                  {tResult && (
-                    <div className="mt-6 space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="space-y-4">
+                      <h3 className="font-bold text-slate-800">原持仓</h3>
                       <div className="grid grid-cols-2 gap-4">
-                        <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 text-center">
-                          <div className="text-xs text-slate-500 mb-1">原成本价</div>
-                          <div className="text-xl font-bold text-slate-700">{tResult.originalCost.toFixed(3)}</div>
+                        <div className="space-y-2">
+                          <label className="text-sm text-slate-600">原持仓成本 (元)</label>
+                          <input
+                            type="number"
+                            value={originalCost}
+                            onChange={(e) => setOriginalCost(e.target.value)}
+                            className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:border-indigo-500 outline-none"
+                            placeholder="10.00"
+                          />
                         </div>
-                        <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-200 text-center">
-                          <div className="text-xs text-indigo-600 mb-1">新成本价</div>
-                          <div className="text-xl font-bold text-indigo-700">{tResult.newCost.toFixed(3)}</div>
-                        </div>
-                      </div>
-
-                      <div className={`p-5 rounded-2xl border-2 ${tResult.costReduction > 0 ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
-                        <div className="flex justify-between items-center">
-                          <div>
-                            <div className="text-sm text-slate-600 mb-1">成本降低</div>
-                            <div className={`text-3xl font-bold ${tResult.costReduction > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                              {tResult.costReduction > 0 ? '↓' : '↑'} {Math.abs(tResult.costReduction).toFixed(3)} 元
-                            </div>
-                          </div>
-                          <div className="text-right">
-                            <div className="text-sm text-slate-600 mb-1">实现盈亏</div>
-                            <div className={`text-xl font-semibold ${tResult.realizedProfit >= 0 ? 'text-red-600' : 'text-green-600'}`}>
-                              {tResult.realizedProfit >= 0 ? '+' : ''}{tResult.realizedProfit.toFixed(2)}
-                            </div>
-                          </div>
+                        <div className="space-y-2">
+                          <label className="text-sm text-slate-600">原持仓数量 (股)</label>
+                          <input
+                            type="number"
+                            value={originalQty}
+                            onChange={(e) => setOriginalQty(e.target.value)}
+                            className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:border-indigo-500 outline-none"
+                            placeholder="1000"
+                          />
                         </div>
                       </div>
+                    </div>
 
-                      <div className="bg-blue-50 p-4 rounded-xl border border-blue-200 flex items-center gap-2 text-sm text-blue-800">
-                        <Info className="w-4 h-4 flex-shrink-0" />
-                        <span>当前持仓: {tResult.totalQuantity}股 | {tDirection === 'buy_first' ? '先买后卖' : '先卖后买'}</span>
+                    <div className="space-y-4">
+                      <h3 className="font-bold text-slate-800">做T操作</h3>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <label className="text-sm text-slate-600">
+                            {tDirection === 'buy_first' ? '买入价格' : '卖出价格'} (元)
+                          </label>
+                          <input
+                            type="number"
+                            value={tPrice}
+                            onChange={(e) => setTPrice(e.target.value)}
+                            className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:border-indigo-500 outline-none"
+                            placeholder="9.80"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-sm text-slate-600">做T数量 (股)</label>
+                          <input
+                            type="number"
+                            value={tQty}
+                            onChange={(e) => setTQty(e.target.value)}
+                            className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:border-indigo-500 outline-none"
+                            placeholder="500"
+                          />
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-sm text-slate-600">
+                          {tDirection === 'buy_first' ? '卖出价格' : '买入价格'} (元) [可选]
+                        </label>
+                        <input
+                          type="number"
+                          value={tSellPrice}
+                          onChange={(e) => setTSellPrice(e.target.value)}
+                          className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:border-indigo-500 outline-none"
+                          placeholder="完成做T的对应价格"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {tCalculation && (
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
+                      <div className="bg-slate-50 p-4 rounded-xl text-center border border-slate-200">
+                        <div className="text-sm text-slate-500 mb-1">原成本价</div>
+                        <div className="text-xl font-bold text-slate-700">¥{tCalculation.originalCost.toFixed(3)}</div>
+                      </div>
+                      <div className="bg-indigo-50 p-4 rounded-xl text-center border border-indigo-200">
+                        <div className="text-sm text-indigo-600 mb-1">新成本价</div>
+                        <div className="text-xl font-bold text-indigo-700">¥{tCalculation.newCost.toFixed(3)}</div>
+                      </div>
+                      <div className={`p-4 rounded-xl text-center border-2 ${tCalculation.costReduction > 0 ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+                        <div className="text-sm text-slate-600 mb-1">成本降低</div>
+                        <div className={`text-xl font-bold ${tCalculation.costReduction > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                          {tCalculation.costReduction > 0 ? '↓' : '↑'} ¥{Math.abs(tCalculation.costReduction).toFixed(3)}
+                        </div>
                       </div>
                     </div>
                   )}
@@ -501,48 +733,122 @@ export default function App() {
             )}
           </div>
         ) : (
+          // 期货模式
           <div className="space-y-6">
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* 左侧：输入区 */}
-              <div className="lg:col-span-2 space-y-6">
-                <div className="bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden">
-                  <div className="bg-gradient-to-r from-purple-600 to-purple-700 p-6 text-white">
-                    <h2 className="text-xl font-bold flex items-center gap-2">
-                      <BarChart3 className="w-6 h-6" />
-                      期货计算器
-                    </h2>
-                  </div>
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+              <div className="p-6 space-y-6">
+                {/* 合约选择与自定义 */}
+                <div className="flex justify-between items-center">
+                  <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                    <BarChart3 className="w-5 h-5 text-purple-600" />
+                    合约选择
+                  </h3>
+                  <button
+                    onClick={() => setShowContractEditor(!showContractEditor)}
+                    className="flex items-center gap-1 text-sm text-purple-600 hover:text-purple-700 font-medium"
+                  >
+                    <Settings className="w-4 h-4" />
+                    {showContractEditor ? '收起参数' : '自定义参数'}
+                  </button>
+                </div>
 
-                  <div className="p-6 space-y-5">
-                    {/* 合约选择 */}
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium text-slate-700">选择合约</label>
-                      <div className="relative">
-                        <select
-                          value={selectedContract.code}
-                          onChange={(e) => setSelectedContract(FUTURES_CONTRACTS.find(c => c.code === e.target.value) || FUTURES_CONTRACTS[0])}
-                          className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 outline-none appearance-none bg-white"
-                        >
-                          {FUTURES_CONTRACTS.map((c) => (
-                            <option key={c.code} value={c.code}>
-                              {c.code} - {c.name}
-                            </option>
-                          ))}
-                        </select>
-                        <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 pointer-events-none" />
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  <div className="lg:col-span-1 space-y-4">
+                    <div className="relative">
+                      <select
+                        value={selectedContractCode}
+                        onChange={(e) => setSelectedContractCode(e.target.value)}
+                        className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:border-purple-500 outline-none appearance-none bg-white"
+                      >
+                        {futuresContracts.map((c) => (
+                          <option key={c.code} value={c.code}>
+                            {c.code} - {c.name}
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 pointer-events-none" />
+                    </div>
+                    
+                    <div className="bg-slate-50 p-4 rounded-lg space-y-2 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">交易所</span>
+                        <span className="font-medium">{selectedContract.exchange}</span>
                       </div>
-                      <div className="flex gap-3 text-xs text-slate-500">
-                        <span>乘数: {selectedContract.multiplier}</span>
-                        <span>保证金: {(selectedContract.marginRate * 100).toFixed(0)}%</span>
-                        <span>最小变动: {selectedContract.minPriceUnit}</span>
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">合约乘数</span>
+                        <span className="font-medium">{selectedContract.multiplier} 元/点</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">保证金比例</span>
+                        <span className="font-medium">{(selectedContract.marginRate * 100).toFixed(0)}%</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">最小变动</span>
+                        <span className="font-medium">{selectedContract.minPriceUnit}</span>
                       </div>
                     </div>
+                  </div>
 
-                    {/* 方向选择 */}
-                    <div className="flex gap-2 p-1 bg-slate-100 rounded-xl w-fit">
+                  {/* 合约参数编辑器 */}
+                  {showContractEditor && (
+                    <div className="lg:col-span-2 bg-purple-50 p-4 rounded-lg border border-purple-200 space-y-4">
+                      <h4 className="font-bold text-purple-800">合约参数编辑</h4>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div className="space-y-2">
+                          <label className="text-xs text-purple-700">合约乘数</label>
+                          <input
+                            type="number"
+                            value={selectedContract.multiplier}
+                            onChange={(e) => updateContract(selectedContract.code, { multiplier: parseInt(e.target.value) || 1 })}
+                            className="w-full px-3 py-2 rounded border border-purple-200 focus:border-purple-500 outline-none text-sm"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-xs text-purple-700">保证金比例 (%)</label>
+                          <input
+                            type="number"
+                            step="0.1"
+                            value={(selectedContract.marginRate * 100).toFixed(1)}
+                            onChange={(e) => updateContract(selectedContract.code, { marginRate: parseFloat(e.target.value) / 100 || 0 })}
+                            className="w-full px-3 py-2 rounded border border-purple-200 focus:border-purple-500 outline-none text-sm"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-xs text-purple-700">最小变动价位</label>
+                          <input
+                            type="number"
+                            step="0.1"
+                            value={selectedContract.minPriceUnit}
+                            onChange={(e) => updateContract(selectedContract.code, { minPriceUnit: parseFloat(e.target.value) || 0.1 })}
+                            className="w-full px-3 py-2 rounded border border-purple-200 focus:border-purple-500 outline-none text-sm"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-xs text-purple-700">交易所</label>
+                          <input
+                            type="text"
+                            value={selectedContract.exchange}
+                            onChange={(e) => updateContract(selectedContract.code, { exchange: e.target.value })}
+                            className="w-full px-3 py-2 rounded border border-purple-200 focus:border-purple-500 outline-none text-sm"
+                          />
+                        </div>
+                      </div>
+                      <p className="text-xs text-purple-600">
+                        * 修改仅影响当前选中合约，刷新页面后恢复默认
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="h-px bg-slate-200" />
+
+                {/* 交易参数 */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  <div className="space-y-4">
+                    <div className="flex gap-2 p-1 bg-slate-100 rounded-lg w-fit">
                       <button
                         onClick={() => setFuturesDirection('long')}
-                        className={`flex items-center gap-2 px-6 py-2 rounded-lg font-medium transition-all ${
+                        className={`flex items-center gap-2 px-4 py-2 rounded-md font-medium transition-all ${
                           futuresDirection === 'long' ? 'bg-white text-red-600 shadow-sm' : 'text-slate-600'
                         }`}
                       >
@@ -551,7 +857,7 @@ export default function App() {
                       </button>
                       <button
                         onClick={() => setFuturesDirection('short')}
-                        className={`flex items-center gap-2 px-6 py-2 rounded-lg font-medium transition-all ${
+                        className={`flex items-center gap-2 px-4 py-2 rounded-md font-medium transition-all ${
                           futuresDirection === 'short' ? 'bg-white text-green-600 shadow-sm' : 'text-slate-600'
                         }`}
                       >
@@ -567,7 +873,7 @@ export default function App() {
                           type="number"
                           value={futuresPrice}
                           onChange={(e) => setFuturesPrice(e.target.value)}
-                          className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 outline-none"
+                          className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:border-purple-500 outline-none"
                           placeholder="3500"
                         />
                       </div>
@@ -577,7 +883,7 @@ export default function App() {
                           type="number"
                           value={futuresLots}
                           onChange={(e) => setFuturesLots(e.target.value)}
-                          className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 outline-none"
+                          className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:border-purple-500 outline-none"
                           placeholder="1"
                         />
                       </div>
@@ -589,165 +895,61 @@ export default function App() {
                         type="number"
                         value={availableFunds}
                         onChange={(e) => setAvailableFunds(e.target.value)}
-                        className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-purple-500 focus:ring-2 focus:ring-purple-200 outline-none"
+                        className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:border-purple-500 outline-none"
                         placeholder="100000"
                       />
                     </div>
-
-                    <div className="space-y-2">
-                      <div className="flex justify-between text-sm">
-                        <span className="font-medium text-slate-700">维持保证金比例</span>
-                        <span className="text-slate-500">{(maintenanceMargin * 100).toFixed(0)}%</span>
-                      </div>
-                      <input
-                        type="range"
-                        min="0.05"
-                        max="0.15"
-                        step="0.01"
-                        value={maintenanceMargin}
-                        onChange={(e) => setMaintenanceMargin(parseFloat(e.target.value))}
-                        className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-purple-600"
-                      />
-                      <div className="flex justify-between text-xs text-slate-400">
-                        <span>5%</span>
-                        <span>15%</span>
-                      </div>
-                    </div>
                   </div>
-                </div>
 
-                {/* 强平风险提示 */}
-                {futuresResult && futuresResult.liquidationPrice > 0 && (
-                  <div className={`rounded-2xl border-l-4 p-6 ${
-                    futuresResult.riskLevel === 'extreme' ? 'bg-red-50 border-red-600' :
-                    futuresResult.riskLevel === 'high' ? 'bg-orange-50 border-orange-500' :
-                    futuresResult.riskLevel === 'medium' ? 'bg-yellow-50 border-yellow-500' :
-                    'bg-green-50 border-green-500'
-                  }`}>
-                    <div className="flex items-start gap-4">
-                      <div className={`p-3 rounded-full ${
-                        futuresResult.riskLevel === 'extreme' ? 'bg-red-100 text-red-600' :
-                        futuresResult.riskLevel === 'high' ? 'bg-orange-100 text-orange-600' :
-                        futuresResult.riskLevel === 'medium' ? 'bg-yellow-100 text-yellow-600' :
-                        'bg-green-100 text-green-600'
-                      }`}>
-                        <ShieldAlert className="w-6 h-6" />
-                      </div>
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-2">
-                          <h3 className="font-bold text-lg">强平风险提示</h3>
-                          <span className={`px-2 py-1 rounded text-xs font-bold ${
-                            futuresResult.riskLevel === 'extreme' ? 'bg-red-600 text-white' :
-                            futuresResult.riskLevel === 'high' ? 'bg-orange-500 text-white' :
-                            futuresResult.riskLevel === 'medium' ? 'bg-yellow-500 text-white' :
-                            'bg-green-500 text-white'
+                  {/* 计算结果 */}
+                  <div className="space-y-4">
+                    {futuresCalculation ? (
+                      <>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="bg-purple-50 p-4 rounded-lg border border-purple-200">
+                            <div className="text-sm text-purple-600 mb-1">占用保证金</div>
+                            <div className="text-xl font-bold text-purple-700">¥{futuresCalculation.margin.toLocaleString()}</div>
+                          </div>
+                          <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
+                            <div className="text-sm text-blue-600 mb-1">最大可开手数</div>
+                            <div className="text-xl font-bold text-blue-700">{futuresCalculation.maxLots} 手</div>
+                          </div>
+                        </div>
+
+                        {futuresCalculation.liquidationPrice > 0 && (
+                          <div className={`p-4 rounded-lg border-l-4 ${
+                            futuresCalculation.riskLevel === 'extreme' ? 'bg-red-50 border-red-500' :
+                            futuresCalculation.riskLevel === 'high' ? 'bg-orange-50 border-orange-500' :
+                            'bg-green-50 border-green-500'
                           }`}>
-                            {futuresResult.riskLevel === 'extreme' ? '极高风险' :
-                             futuresResult.riskLevel === 'high' ? '高风险' :
-                             futuresResult.riskLevel === 'medium' ? '中等风险' : '低风险'}
-                          </span>
-                        </div>
-                        <div className="grid grid-cols-2 gap-4 mt-3">
-                          <div>
-                            <div className="text-sm text-slate-600 mb-1">预估强平价格</div>
-                            <div className={`text-2xl font-bold ${futuresDirection === 'long' ? 'text-green-600' : 'text-red-600'}`}>
-                              {futuresResult.liquidationPrice.toFixed(2)}
+                            <div className="flex items-center gap-2 mb-2">
+                              <ShieldAlert className="w-5 h-5 text-slate-700" />
+                              <span className="font-bold text-slate-800">强平风险提示</span>
                             </div>
-                          </div>
-                          <div>
-                            <div className="text-sm text-slate-600 mb-1">价格安全空间</div>
                             <div className="text-2xl font-bold text-slate-700">
-                              {futuresDirection === 'long' 
-                                ? ((parseFloat(futuresPrice) - futuresResult.liquidationPrice) / parseFloat(futuresPrice) * 100).toFixed(2)
-                                : ((futuresResult.liquidationPrice - parseFloat(futuresPrice)) / parseFloat(futuresPrice) * 100).toFixed(2)
-                              }%
+                              {futuresCalculation.liquidationPrice.toFixed(2)}
                             </div>
+                            <p className="text-sm text-slate-600 mt-1">
+                              {futuresDirection === 'long' ? '跌破' : '涨破'}此价格将触发强平
+                            </p>
                           </div>
+                        )}
+
+                        <div className="bg-slate-800 text-white p-4 rounded-lg">
+                          <div className="text-sm text-slate-400 mb-1">每跳盈亏 (¥)</div>
+                          <div className="text-2xl font-bold text-yellow-400">
+                            ±{futuresCalculation.pricePerTick}
+                          </div>
+                          <p className="text-xs text-slate-400 mt-1">
+                            每波动 {selectedContract.minPriceUnit} 个点
+                          </p>
                         </div>
+                      </>
+                    ) : (
+                      <div className="flex items-center justify-center h-full text-slate-400">
+                        输入开仓价格查看计算结果
                       </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* 右侧：数据面板 */}
-              <div className="space-y-6">
-                {/* 保证金信息 */}
-                <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-6">
-                  <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
-                    <Wallet className="w-5 h-5 text-purple-600" />
-                    资金计算
-                  </h3>
-                  {futuresResult ? (
-                    <div className="space-y-3">
-                      <div className="flex justify-between items-center p-3 bg-purple-50 rounded-xl">
-                        <span className="text-sm text-slate-600">占用保证金</span>
-                        <span className="font-bold text-purple-700">{futuresResult.margin.toLocaleString()} 元</span>
-                      </div>
-                      <div className="flex justify-between items-center p-3 bg-slate-50 rounded-xl">
-                        <span className="text-sm text-slate-600">最大可开手数</span>
-                        <span className="font-bold text-slate-800">{futuresResult.maxLots} 手</span>
-                      </div>
-                      {availableFunds && (
-                        <div className="flex justify-between items-center p-3 bg-blue-50 rounded-xl">
-                          <span className="text-sm text-slate-600">资金利用率</span>
-                          <span className="font-bold text-blue-700">
-                            {((futuresResult.margin / parseFloat(availableFunds)) * 100).toFixed(1)}%
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="text-center text-slate-400 py-8 text-sm">输入价格后自动计算</div>
-                  )}
-                </div>
-
-                {/* 波动盈亏 */}
-                <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl shadow-lg p-6 text-white">
-                  <h3 className="font-bold mb-4 flex items-center gap-2">
-                    <Activity className="w-5 h-5" />
-                    波动盈亏
-                  </h3>
-                  <div className="text-center mb-4">
-                    <div className="text-4xl font-bold text-yellow-400">
-                      ±{futuresResult?.pricePerTick || selectedContract.multiplier * selectedContract.minPriceUnit} 元
-                    </div>
-                    <div className="text-xs text-slate-400 mt-1">
-                      每波动 {selectedContract.minPriceUnit} 个点
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3 text-center">
-                    <div className="bg-slate-800 p-3 rounded-xl">
-                      <div className="text-xs text-slate-400 mb-1">涨停盈利</div>
-                      <div className="text-lg font-semibold text-red-400">
-                        +{futuresPrice ? (parseFloat(futuresPrice) * 0.1 * selectedContract.multiplier * (parseInt(futuresLots) || 1)).toFixed(0) : '0'}
-                      </div>
-                    </div>
-                    <div className="bg-slate-800 p-3 rounded-xl">
-                      <div className="text-xs text-slate-400 mb-1">跌停亏损</div>
-                      <div className="text-lg font-semibold text-green-400">
-                        -{futuresPrice ? (parseFloat(futuresPrice) * 0.1 * selectedContract.multiplier * (parseInt(futuresLots) || 1)).toFixed(0) : '0'}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* 合约信息 */}
-                <div className="bg-white rounded-2xl shadow-lg border border-slate-200 p-6">
-                  <h3 className="font-bold text-slate-800 mb-4">合约参数</h3>
-                  <div className="space-y-3 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-slate-500">交易所</span>
-                      <span className="font-medium">{selectedContract.exchange}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-500">合约乘数</span>
-                      <span className="font-medium">{selectedContract.multiplier} 元/点</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-500">保证金比例</span>
-                      <span className="font-medium">{(selectedContract.marginRate * 100).toFixed(0)}%</span>
-                    </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -758,7 +960,7 @@ export default function App() {
         {/* 底部说明 */}
         <div className="text-center text-slate-400 text-xs pb-8">
           <p>交易计算器仅供参考，实际交易请以交易所和券商结算为准</p>
-          <p className="mt-1">期货交易风险极高，请谨慎操作</p>
+          <p className="mt-1">股市有风险，入市需谨慎；期货交易可能导致本金全部损失</p>
         </div>
       </div>
     </div>
