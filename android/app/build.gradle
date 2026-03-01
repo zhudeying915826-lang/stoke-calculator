@@ -1,5 +1,7 @@
-apply plugin: 'com.android.application'
-apply plugin: 'org.jetbrains.kotlin.android'
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
 
 android {
     namespace "com.a"
@@ -11,8 +13,6 @@ android {
         targetSdk 34
         versionCode 1
         versionName "1.0"
-        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
-        buildConfigField "boolean", "IS_NEW_ARCHITECTURE_ENABLED", "false"
     }
     
     buildTypes {
@@ -30,30 +30,10 @@ android {
     kotlinOptions {
         jvmTarget = '17'
     }
-    
-    buildFeatures {
-        buildConfig true
-    }
-}
-
-repositories {
-    google()
-    mavenCentral()
 }
 
 dependencies {
-    implementation fileTree(include: ['*.jar'], dir: 'libs')
-    implementation "androidx.appcompat:appcompat:1.6.1"
-    implementation "androidx.core:core-ktx:1.12.0"
-    
-    // React Native - 通过 Maven
-    implementation "com.facebook.react:react-native:0.72.6"
-    implementation "com.facebook.react:hermes-android:0.72.6"
-    
-    // Expo
-    implementation "expo.modules.kotlin:expo-modules-core:1.5.0"
-    
-    testImplementation "junit:junit:4.13.2"
-    androidTestImplementation "androidx.test.ext:junit:1.1.5"
-    androidTestImplementation "androidx.test.espresso:espresso-core:3.5.1"
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation 'androidx.core:core-ktx:1.12.0'
+    implementation 'androidx.webkit:webkit:1.8.0'
 }
