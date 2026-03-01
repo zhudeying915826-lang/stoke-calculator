@@ -16,6 +16,3 @@ dependencyResolutionManagement {
 
 rootProject.name = 'stockcalculator'
 include ':app'
-
-// React Native Gradle Plugin
-includeBuild('../node_modules/@react-native/gradle-plugin')
