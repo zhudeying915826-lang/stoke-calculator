@@ -1,13 +1,10 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { 
   Calculator, 
   TrendingUp, 
   TrendingDown, 
-  Wallet, 
-  Info,
   Activity,
   BarChart3,
-  DollarSign,
   ShieldAlert,
   ChevronDown,
   RotateCcw,
@@ -37,10 +34,10 @@ const DEFAULT_FUTURES_CONTRACTS = [
 
 // 费率设置类型
 interface FeeSettings {
-  commissionRate: number;      // 佣金费率（万分之几）
-  minCommission: number;       // 最低佣金
-  stampDutyRate: number;       // 印花税率（万分之几）
-  transferFeeRate: number;     // 过户费率（万分之几）
+  commissionRate: number;
+  minCommission: number;
+  stampDutyRate: number;
+  transferFeeRate: number;
 }
 
 // 期货合约类型
@@ -54,12 +51,9 @@ interface FuturesContract {
 }
 
 export default function App() {
-  // 全局模式
   const [mode, setMode] = useState<TradeMode>('stock');
   const [activeTab, setActiveTab] = useState<'basic' | 't'>('basic');
-  const [showFeeSettings, setShowFeeSettings] = useState(false);
 
-  // 股票费率设置（默认万3佣金，千1印花税，万0.1过户费）
   const [feeSettings, setFeeSettings] = useState<FeeSettings>({
     commissionRate: 3,
     minCommission: 5,
@@ -67,13 +61,11 @@ export default function App() {
     transferFeeRate: 0.1
   });
 
-  // 股票基础
   const [stockBuyPrice, setStockBuyPrice] = useState<string>('');
   const [stockBuyQty, setStockBuyQty] = useState<string>('100');
   const [stockSellPrice, setStockSellPrice] = useState<string>('');
   const [stockSellQty, setStockSellQty] = useState<string>('100');
 
-  // 做T
   const [tDirection, setTDirection] = useState<TDirection>('buy_first');
   const [originalCost, setOriginalCost] = useState('');
   const [originalQty, setOriginalQty] = useState('');
@@ -81,14 +73,12 @@ export default function App() {
   const [tQty, setTQty] = useState('');
   const [tSellPrice, setTSellPrice] = useState('');
 
-  // 期货
   const [futuresContracts, setFuturesContracts] = useState<FuturesContract[]>(DEFAULT_FUTURES_CONTRACTS);
   const [selectedContractCode, setSelectedContractCode] = useState('IF');
   const [futuresPrice, setFuturesPrice] = useState('');
   const [futuresLots, setFuturesLots] = useState('1');
   const [availableFunds, setAvailableFunds] = useState('');
   const [futuresDirection, setFuturesDirection] = useState<FuturesDirection>('long');
-  const [maintenanceMargin, setMaintenanceMargin] = useState(0.08);
   const [showContractEditor, setShowContractEditor] = useState(false);
 
   const selectedContract = useMemo(() => 
@@ -96,7 +86,6 @@ export default function App() {
     [futuresContracts, selectedContractCode]
   );
 
-  // 计算股票成本明细和保本价
   const stockCalculation = useMemo(() => {
     const buyPrice = parseFloat(stockBuyPrice) || 0;
     const buyQty = parseInt(stockBuyQty) || 0;
@@ -105,29 +94,22 @@ export default function App() {
 
     if (!buyPrice || !buyQty) return null;
 
-    // 买入成本计算
     const buyAmount = buyPrice * buyQty;
     const buyCommission = Math.max(buyAmount * (feeSettings.commissionRate / 10000), feeSettings.minCommission);
     const buyTransferFee = buyAmount * (feeSettings.transferFeeRate / 10000);
     const buyTotalCost = buyCommission + buyTransferFee;
     const buyNetCost = buyAmount + buyTotalCost;
 
-    // 保本价计算（卖出要覆盖所有成本）
-    // 保本公式：卖出价 = (买入总成本 + 卖出最低佣金 + 卖出过户费) / (数量 * (1 - 佣金率 - 印花税率 - 过户费率))
-    // 简化计算：考虑卖出时的税费
     const sellCommissionRate = feeSettings.commissionRate / 10000;
     const stampDutyRate = feeSettings.stampDutyRate / 10000;
     const transferRate = feeSettings.transferFeeRate / 10000;
     
-    // 分母：(1 - 卖出佣金率 - 印花税率 - 过户费率)
     const denominator = 1 - sellCommissionRate - stampDutyRate - transferRate;
-    // 分子：买入总成本 + 卖出最低佣金（假设先按最低算）
     let breakEvenPrice = 0;
     if (denominator > 0) {
       breakEvenPrice = (buyNetCost + feeSettings.minCommission) / (buyQty * denominator);
     }
 
-    // 如果有卖出价格，计算盈亏
     let sellCalculation = null;
     if (sellPrice && sellQty) {
       const sellAmount = sellPrice * sellQty;
@@ -167,7 +149,6 @@ export default function App() {
     };
   }, [stockBuyPrice, stockBuyQty, stockSellPrice, stockSellQty, feeSettings]);
 
-  // 计算做T
   const tCalculation = useMemo(() => {
     const origCost = parseFloat(originalCost);
     const origQty = parseInt(originalQty);
@@ -208,7 +189,6 @@ export default function App() {
     };
   }, [originalCost, originalQty, tPrice, tQty, tSellPrice, tDirection]);
 
-  // 计算期货
   const futuresCalculation = useMemo(() => {
     const price = parseFloat(futuresPrice) || 0;
     const lots = parseInt(futuresLots) || 0;
@@ -222,7 +202,7 @@ export default function App() {
     
     let liquidationPrice = 0;
     if (funds && lots > 0) {
-      const maintMargin = price * multiplier * lots * maintenanceMargin;
+      const maintMargin = price * multiplier * lots * 0.08;
       const buffer = funds - maintMargin;
       if (futuresDirection === 'long') {
         liquidationPrice = price - (buffer / (lots * multiplier));
@@ -245,17 +225,8 @@ export default function App() {
       riskLevel,
       utilization
     };
-  }, [futuresPrice, futuresLots, availableFunds, selectedContract, futuresDirection, maintenanceMargin]);
+  }, [futuresPrice, futuresLots, availableFunds, selectedContract, futuresDirection]);
 
-  // 重置股票
-  const resetStock = () => {
-    setStockBuyPrice('');
-    setStockBuyQty('100');
-    setStockSellPrice('');
-    setStockSellQty('100');
-  };
-
-  // 重置费率
   const resetFees = () => {
     setFeeSettings({
       commissionRate: 3,
@@ -265,7 +236,6 @@ export default function App() {
     });
   };
 
-  // 更新合约参数
   const updateContract = (code: string, updates: Partial<FuturesContract>) => {
     setFuturesContracts(prev => prev.map(c => 
       c.code === code ? { ...c, ...updates } : c
@@ -275,7 +245,6 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-50 p-4 md:p-6">
       <div className="max-w-6xl mx-auto space-y-6">
-        {/* 头部 */}
         <div className="flex flex-col md:flex-row justify-between items-center bg-white rounded-2xl shadow-sm p-6 border border-slate-200">
           <div className="flex items-center gap-3 mb-4 md:mb-0">
             <div className="p-3 bg-blue-600 rounded-xl">
@@ -311,7 +280,6 @@ export default function App() {
 
         {mode === 'stock' ? (
           <div className="space-y-6">
-            {/* 内页切换 */}
             <div className="flex justify-center">
               <div className="inline-flex bg-white p-1 rounded-xl shadow-sm border border-slate-200">
                 <button
@@ -335,12 +303,9 @@ export default function App() {
 
             {activeTab === 'basic' ? (
               <div className="space-y-6">
-                {/* 参数输入区 - 参考图片风格 */}
                 <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
                   <div className="p-6 space-y-6">
-                    {/* 买入卖出参数 */}
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                      {/* 买入参数 */}
                       <div className="space-y-4">
                         <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
                           <TrendingDown className="w-5 h-5 text-green-600" />
@@ -371,7 +336,6 @@ export default function App() {
                         </div>
                       </div>
 
-                      {/* 卖出参数 */}
                       <div className="space-y-4">
                         <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
                           <TrendingUp className="w-5 h-5 text-red-600" />
@@ -405,7 +369,6 @@ export default function App() {
 
                     <div className="h-px bg-slate-200" />
 
-                    {/* 费率设置 */}
                     <div className="space-y-4">
                       <div className="flex justify-between items-center">
                         <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
@@ -470,10 +433,8 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* 结果显示区 - 三栏布局参考图片 */}
                 {stockCalculation && (
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    {/* 买入成本明细 */}
                     <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
                       <div className="bg-green-50 p-4 border-b border-green-100">
                         <h3 className="font-bold text-green-800 flex items-center gap-2">
@@ -502,7 +463,6 @@ export default function App() {
                       </div>
                     </div>
 
-                    {/* 卖出收入明细 */}
                     <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
                       <div className="bg-red-50 p-4 border-b border-red-100">
                         <h3 className="font-bold text-red-800 flex items-center gap-2">
@@ -543,7 +503,6 @@ export default function App() {
                       </div>
                     </div>
 
-                    {/* 盈亏分析 */}
                     <div className="bg-white rounded-2xl shadow-sm border-2 border-red-200 overflow-hidden">
                       <div className="bg-red-100 p-4 border-b border-red-200">
                         <h3 className="font-bold text-red-800">盈亏分析</h3>
@@ -592,7 +551,6 @@ export default function App() {
                           </div>
                         )}
                         
-                        {/* 保本价提示 */}
                         <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
                           <div className="flex items-center gap-2 mb-1">
                             <Target className="w-4 h-4 text-blue-600" />
@@ -611,7 +569,6 @@ export default function App() {
                 )}
               </div>
             ) : (
-              // 做T计算器
               <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
                 <div className="bg-gradient-to-r from-indigo-600 to-indigo-700 p-6 text-white">
                   <h2 className="text-xl font-bold flex items-center gap-2">
@@ -733,11 +690,9 @@ export default function App() {
             )}
           </div>
         ) : (
-          // 期货模式
           <div className="space-y-6">
             <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
               <div className="p-6 space-y-6">
-                {/* 合约选择与自定义 */}
                 <div className="flex justify-between items-center">
                   <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
                     <BarChart3 className="w-5 h-5 text-purple-600" />
@@ -789,7 +744,6 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* 合约参数编辑器 */}
                   {showContractEditor && (
                     <div className="lg:col-span-2 bg-purple-50 p-4 rounded-lg border border-purple-200 space-y-4">
                       <h4 className="font-bold text-purple-800">合约参数编辑</h4>
@@ -842,7 +796,6 @@ export default function App() {
 
                 <div className="h-px bg-slate-200" />
 
-                {/* 交易参数 */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   <div className="space-y-4">
                     <div className="flex gap-2 p-1 bg-slate-100 rounded-lg w-fit">
@@ -901,7 +854,6 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* 计算结果 */}
                   <div className="space-y-4">
                     {futuresCalculation ? (
                       <>
@@ -957,7 +909,6 @@ export default function App() {
           </div>
         )}
 
-        {/* 底部说明 */}
         <div className="text-center text-slate-400 text-xs pb-8">
           <p>交易计算器仅供参考，实际交易请以交易所和券商结算为准</p>
           <p className="mt-1">股市有风险，入市需谨慎；期货交易可能导致本金全部损失</p>
