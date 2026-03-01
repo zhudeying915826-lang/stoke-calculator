@@ -16,3 +16,5 @@ dependencyResolutionManagement {
 
 rootProject.name = 'stockcalculator'
 include ':app'
+include ':react-native-gradle-plugin'
+project(':react-native-gradle-plugin').projectDir = file('../node_modules/@react-native/gradle-plugin')
