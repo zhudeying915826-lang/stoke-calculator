@@ -33,6 +33,7 @@ jobs:
       run: |
           mkdir -p android/app/src/main/assets/www
           cp -r dist/* android/app/src/main/assets/www/
+          ls -la android/app/src/main/assets/www/  # 添加这行确认文件已复制
     - name: Sync Capacitor
       run: npx cap sync android
     
