@@ -17,8 +17,8 @@ dependencyResolutionManagement {
 rootProject.name = 'stockcalculator'
 include ':app'
 include ':capacitor-android'
-project(':capacitor-android').projectDir = new File('../node_modules/@capacitor/android')
+project(':capacitor-android').projectDir = new File('../node_modules/@capacitor/android/capacitor-android')
 
-// 如果下面这行存在但报错，暂时注释掉或删除
+// 如果不需要 Cordova 插件，注释掉下面两行
 // include ':capacitor-cordova-android-plugins'
-// project(':capacitor-cordova-android-plugins').projectDir = new File('../node_modules/@capacitor/android/capacitor-cordova-android-plugins')
+// project(':capacitor-cordova-android-plugins').projectDir = new File('./capacitor-cordova-android-plugins')
