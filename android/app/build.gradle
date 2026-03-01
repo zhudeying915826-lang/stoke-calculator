@@ -1,17 +1,21 @@
 apply plugin: 'com.android.application'
 apply plugin: 'org.jetbrains.kotlin.android'
+apply plugin: 'com.facebook.react'  // React Native 插件
 
 android {
-    namespace "com.stockcalculator.app"
+    namespace "com.a"  // 注意包名是 com.a
     compileSdk 34
     
     defaultConfig {
-        applicationId "com.stockcalculator.app"
+        applicationId "com.a"  // 注意包名是 com.a
         minSdk 22
         targetSdk 34
         versionCode 1
         versionName "1.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        
+        // React Native 需要
+        buildConfigField "boolean", "IS_NEW_ARCHITECTURE_ENABLED", "false"
     }
     
     buildTypes {
@@ -29,34 +33,30 @@ android {
     kotlinOptions {
         jvmTarget = '17'
     }
+    
+    buildFeatures {
+        buildConfig true
+    }
 }
 
 repositories {
     google()
     mavenCentral()
-    flatDir {
-        dirs 'libs'
-    }
 }
 
 dependencies {
     implementation fileTree(include: ['*.jar'], dir: 'libs')
     implementation "androidx.appcompat:appcompat:1.6.1"
     implementation "androidx.core:core-ktx:1.12.0"
-    implementation 'com.capacitorjs:core:5.7.0'
+    
+    // React Native
+    implementation "com.facebook.react:react-native:+"
+    
+    // Expo
+    implementation "expo:expo:+"
+    implementation "expo:expo-modules-core:+"
+    
     testImplementation "junit:junit:4.13.2"
     androidTestImplementation "androidx.test.ext:junit:1.1.5"
     androidTestImplementation "androidx.test.espresso:espresso-core:3.5.1"
-}
-
-// 如果需要使用 Capacitor 插件，保留这行；如果报错说找不到文件，就注释掉
-// apply from: 'capacitor.build.gradle'
-
-try {
-    def servicesJSON = file('google-services.json')
-    if (servicesJSON.text) {
-        apply plugin: 'com.google.gms.google-services'
-    }
-} catch(Exception e) {
-    logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
 }
