@@ -7,7 +7,7 @@ pluginManagement {
 }
 
 dependencyResolutionManagement {
-    repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
+    repositoriesMode.set(RepositoriesMode.PREFER_PROJECT)
     repositories {
         google()
         mavenCentral()
@@ -17,8 +17,8 @@ dependencyResolutionManagement {
 rootProject.name = 'stockcalculator'
 include ':app'
 include ':capacitor-android'
-project(':capacitor-android').projectDir = new File('../node_modules/@capacitor/android/capacitor-android')
-
+project(':capacitor-android').projectDir = new 
+File('../node_modules/@capacitor/android')
 // 如果不需要 Cordova 插件，注释掉下面两行
 // include ':capacitor-cordova-android-plugins'
 // project(':capacitor-cordova-android-plugins').projectDir = new File('./capacitor-cordova-android-plugins')
