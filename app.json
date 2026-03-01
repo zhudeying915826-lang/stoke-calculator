@@ -1,0 +1,32 @@
+{
+  "expo": {
+    "name": "A股股票交易计算器",
+    "slug": "stock-calculator",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./public/icon-512x512.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./public/icon-512x512.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#3b82f6"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.stockcalculator.app"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./public/icon-512x512.png",
+        "backgroundColor": "#3b82f6"
+      },
+      "package": "com.stockcalculator.app"
+    },
+    "web": {
+      "favicon": "./public/favicon.ico"
+    }
+  }
+}
