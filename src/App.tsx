@@ -1,13 +1,10 @@
 import { useState, useEffect } from 'react';
 import { 
-  ArrowRightLeft, 
+  Calculator, 
   TrendingUp, 
   TrendingDown, 
-  Calculator, 
   Wallet, 
-  AlertTriangle, 
   Info,
-  RotateCcw,
   Activity,
   BarChart3,
   DollarSign,
