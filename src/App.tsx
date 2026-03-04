@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { 
   Calculator, 
   TrendingUp, 
@@ -6,37 +6,30 @@ import {
   Activity,
   BarChart3,
   ShieldAlert,
-  ChevronDown,
-  RotateCcw,
   Settings,
-  Target,
   Plus,
   Trash2,
-  Save,
   AlertTriangle,
   CheckCircle,
   X,
-  Calendar,
   Percent,
-  DollarSign,
-  TrendingFlat
+  DollarSign
 } from 'lucide-react';
 
 // ==================== 类型定义 ====================
 
 type TradeMode = 'stock' | 'futures';
-type TradeDirection = 'buy' | 'sell';
 
 // 做T记录
 interface TTrade {
   id: string;
   date: string;
-  direction: 'buy_first' | 'sell_first'; // 先买后卖 或 先卖后买
+  direction: 'buy_first' | 'sell_first';
   price: number;
   quantity: number;
-  closePrice?: number; // 做T平仓价格
-  profit: number; // 已实现盈亏
-  status: 'open' | 'closed'; // 是否完成做T
+  closePrice?: number;
+  profit: number;
+  status: 'open' | 'closed';
 }
 
 // 持仓标的
@@ -45,47 +38,29 @@ interface Position {
   code: string;
   name: string;
   mode: TradeMode;
-  // 基础信息
   buyPrice: number;
   quantity: number;
   currentPrice: number;
-  // 费用设置（每个标的独立，默认用全局）
-  commissionRate: number; // 万分之
+  commissionRate: number;
   minCommission: number;
-  stampDutyRate: number; // 万分之
-  transferFeeRate: number; // 万分之
-  // 做T记录
+  stampDutyRate: number;
+  transferFeeRate: number;
   tTrades: TTrade[];
-  // 策略设置
   stopLossConfig: {
     enabled: boolean;
-    pauseThreshold: number; // -8%
-    pauseDays: number; // 3天
-    halfPositionThreshold: number; // -15%
-    clearThreshold: number; // -20%
+    pauseThreshold: number;
+    pauseDays: number;
+    halfPositionThreshold: number;
+    clearThreshold: number;
   };
   takeProfitConfig: {
     enabled: boolean;
-    steps: { profitPercent: number; reducePercent: number }[]; // 阶梯止盈
+    steps: { profitPercent: number; reducePercent: number }[];
   };
-  // 状态
-  isPaused: boolean; // 是否暂停交易
-  pauseEndDate?: string; // 暂停结束日期
+  isPaused: boolean;
+  pauseEndDate?: string;
   createdAt: string;
 }
-
-// 期货合约配置
-const FUTURES_CONTRACTS = [
-  { code: 'IF', name: '沪深300股指', multiplier: 300, marginRate: 0.12, minPriceUnit: 0.2, exchange: 'CFFEX' },
-  { code: 'IC', name: '中证500股指', multiplier: 200, marginRate: 0.12, minPriceUnit: 0.2, exchange: 'CFFEX' },
-  { code: 'IH', name: '上证50股指', multiplier: 300, marginRate: 0.12, minPriceUnit: 0.2, exchange: 'CFFEX' },
-  { code: 'RB', name: '螺纹钢', multiplier: 10, marginRate: 0.09, minPriceUnit: 1, exchange: 'SHFE' },
-  { code: 'CU', name: '铜', multiplier: 5, marginRate: 0.10, minPriceUnit: 10, exchange: 'SHFE' },
-  { code: 'AU', name: '黄金', multiplier: 1000, marginRate: 0.08, minPriceUnit: 0.02, exchange: 'SHFE' },
-  { code: 'AG', name: '白银', multiplier: 15, marginRate: 0.12, minPriceUnit: 1, exchange: 'SHFE' },
-  { code: 'C', name: '玉米', multiplier: 10, marginRate: 0.08, minPriceUnit: 1, exchange: 'DCE' },
-  { code: 'SC', name: '原油', multiplier: 1000, marginRate: 0.10, minPriceUnit: 0.1, exchange: 'INE' },
-];
 
 // ==================== 辅助函数 ====================
 
@@ -95,30 +70,24 @@ const formatDate = (date: Date) => date.toISOString().split('T')[0];
 
 const calculateHoldingCost = (position: Position): number => {
   let totalCost = position.buyPrice * position.quantity;
-  let totalQty = position.quantity;
   
-  // 计算做T对成本的影响
   position.tTrades.forEach(t => {
     if (t.direction === 'buy_first' && t.status === 'closed') {
-      // 先买后卖：低价买入高价卖出，降低原持仓成本
       totalCost += t.price * t.quantity - t.closePrice! * t.quantity;
     } else if (t.direction === 'sell_first' && t.status === 'closed') {
-      // 先卖后买：高价卖出低价买回，降低原持仓成本
       totalCost -= t.price * t.quantity - t.closePrice! * t.quantity;
     }
   });
   
-  return totalQty > 0 ? totalCost / totalQty : 0;
+  return position.quantity > 0 ? totalCost / position.quantity : 0;
 };
 
 // ==================== 主组件 ====================
 
 export default function TradingCalculator() {
-  // 全局模式
   const [mode, setMode] = useState<TradeMode>('stock');
   const [activeTab, setActiveTab] = useState<'positions' | 'ttrade' | 'strategy'>('positions');
   
-  // 数据持久化 - 持仓列表
   const [positions, setPositions] = useState<Position[]>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('trading-positions');
@@ -135,7 +104,6 @@ export default function TradingCalculator() {
   
   const [selectedPositionId, setSelectedPositionId] = useState<string | null>(null);
   
-  // 新建持仓表单
   const [showNewPositionForm, setShowNewPositionForm] = useState(false);
   const [newPosition, setNewPosition] = useState<Partial<Position>>({
     mode: 'stock',
@@ -155,12 +123,11 @@ export default function TradingCalculator() {
       steps: [
         { profitPercent: 30, reducePercent: 30 },
         { profitPercent: 60, reducePercent: 30 },
-        { profitPercent: 100, reducePercent: 60 } // 减到保留10%
+        { profitPercent: 100, reducePercent: 60 }
       ]
     }
   });
 
-  // 做T表单
   const [tForm, setTForm] = useState({
     direction: 'buy_first' as 'buy_first' | 'sell_first',
     price: '',
@@ -168,18 +135,15 @@ export default function TradingCalculator() {
     closePrice: ''
   });
 
-  // 保存数据到localStorage
   useEffect(() => {
     localStorage.setItem('trading-positions', JSON.stringify(positions));
   }, [positions]);
 
-  // 当前选中持仓
   const currentPosition = useMemo(() => 
     positions.find(p => p.id === selectedPositionId),
     [positions, selectedPositionId]
   );
 
-  // 计算持仓数据
   const calculatePositionData = (position: Position) => {
     const holdingCost = calculateHoldingCost(position);
     const marketValue = position.currentPrice * position.quantity;
@@ -187,27 +151,22 @@ export default function TradingCalculator() {
     const unrealizedProfit = marketValue - costBasis;
     const unrealizedProfitRate = costBasis > 0 ? (unrealizedProfit / costBasis) * 100 : 0;
     
-    // 已实现盈亏（来自做T）
     const realizedProfit = position.tTrades
       .filter(t => t.status === 'closed')
       .reduce((sum, t) => sum + t.profit, 0);
     
-    // 总盈亏
     const totalProfit = unrealizedProfit + realizedProfit;
     
-    // 买入成本明细
     const buyAmount = position.buyPrice * position.quantity;
     const buyCommission = Math.max(buyAmount * (position.commissionRate / 10000), position.minCommission);
     const buyTransferFee = buyAmount * (position.transferFeeRate / 10000);
     
-    // 当前卖出费用（预估）
     const sellAmount = position.currentPrice * position.quantity;
     const sellCommission = Math.max(sellAmount * (position.commissionRate / 10000), position.minCommission);
     const sellStampDuty = sellAmount * (position.stampDutyRate / 10000);
     const sellTransferFee = sellAmount * (position.transferFeeRate / 10000);
     const totalSellFee = sellCommission + sellStampDuty + sellTransferFee;
     
-    // 保本价计算
     const breakEvenPrice = position.quantity > 0 
       ? (costBasis + buyCommission + buyTransferFee + position.minCommission) / 
         (position.quantity * (1 - position.commissionRate/10000 - position.stampDutyRate/10000 - position.transferFeeRate/10000))
@@ -231,13 +190,11 @@ export default function TradingCalculator() {
     };
   };
 
-  // 策略提醒
   const getStrategyAlerts = (position: Position) => {
     const alerts: { type: 'warning' | 'success' | 'danger'; message: string }[] = [];
     const data = calculatePositionData(position);
     const profitRate = data.unrealizedProfitRate;
     
-    // 止盈检查
     if (position.takeProfitConfig.enabled) {
       const steps = position.takeProfitConfig.steps;
       for (const step of steps) {
@@ -250,7 +207,6 @@ export default function TradingCalculator() {
       }
     }
     
-    // 止损检查
     if (position.stopLossConfig.enabled && !position.isPaused) {
       const { pauseThreshold, halfPositionThreshold, clearThreshold } = position.stopLossConfig;
       
@@ -286,7 +242,6 @@ export default function TradingCalculator() {
     return alerts;
   };
 
-  // 添加新持仓
   const addPosition = () => {
     if (!newPosition.code || !newPosition.buyPrice || !newPosition.quantity) return;
     
@@ -336,7 +291,6 @@ export default function TradingCalculator() {
     });
   };
 
-  // 删除持仓
   const deletePosition = (id: string) => {
     setPositions(positions.filter(p => p.id !== id));
     if (selectedPositionId === id) {
@@ -344,14 +298,12 @@ export default function TradingCalculator() {
     }
   };
 
-  // 更新当前价格
   const updateCurrentPrice = (id: string, price: number) => {
     setPositions(positions.map(p => 
       p.id === id ? { ...p, currentPrice: price } : p
     ));
   };
 
-  // 添加做T记录
   const addTTrade = () => {
     if (!currentPosition || !tForm.price || !tForm.quantity) return;
     
@@ -366,13 +318,10 @@ export default function TradingCalculator() {
       status: tForm.closePrice ? 'closed' : 'open'
     };
     
-    // 计算已实现盈亏
     if (tTrade.status === 'closed' && tTrade.closePrice) {
       if (tTrade.direction === 'buy_first') {
-        // 先买后卖：利润 = (卖价 - 买价) * 数量
         tTrade.profit = (tTrade.closePrice - tTrade.price) * tTrade.quantity;
       } else {
-        // 先卖后买：利润 = (卖价 - 买价) * 数量（这里的price是卖出价）
         tTrade.profit = (tTrade.price - tTrade.closePrice) * tTrade.quantity;
       }
     }
@@ -391,7 +340,6 @@ export default function TradingCalculator() {
     });
   };
 
-  // 关闭做T（平仓）
   const closeTTrade = (tradeId: string, closePrice: number) => {
     if (!currentPosition) return;
     
@@ -421,7 +369,6 @@ export default function TradingCalculator() {
     }));
   };
 
-  // 执行策略操作（暂停/减仓等）
   const executeStrategy = (action: 'pause' | 'half' | 'clear') => {
     if (!currentPosition) return;
     
@@ -437,7 +384,6 @@ export default function TradingCalculator() {
         break;
       }
       case 'half': {
-        // 半仓减持：减少一半数量，已实现盈亏保持不变
         setPositions(positions.map(p => 
           p.id === currentPosition.id 
             ? { ...p, quantity: Math.floor(p.quantity / 2) }
@@ -446,7 +392,6 @@ export default function TradingCalculator() {
         break;
       }
       case 'clear': {
-        // 清仓：删除持仓或标记为已清仓（这里选择保留记录但标记为0持仓）
         setPositions(positions.map(p => 
           p.id === currentPosition.id 
             ? { ...p, quantity: 0 }
@@ -606,7 +551,6 @@ export default function TradingCalculator() {
                     </div>
                   </div>
 
-                  {/* 快捷操作按钮 */}
                   <div className="flex gap-2 mt-4">
                     <button
                       onClick={() => setActiveTab('positions')}
@@ -693,7 +637,6 @@ export default function TradingCalculator() {
                       const data = calculatePositionData(currentPosition);
                       return (
                         <>
-                          {/* 成本与盈亏 */}
                           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
                             <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
                               <DollarSign className="w-5 h-5 text-blue-600" />
@@ -734,7 +677,6 @@ export default function TradingCalculator() {
                             </div>
                           </div>
 
-                          {/* 费用明细 */}
                           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
                             <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
                               <Percent className="w-5 h-5 text-green-600" />
@@ -771,7 +713,6 @@ export default function TradingCalculator() {
                             </div>
                           </div>
 
-                          {/* 费率设置 */}
                           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
                             <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
                               <Settings className="w-5 h-5 text-purple-600" />
@@ -848,7 +789,6 @@ export default function TradingCalculator() {
                 {/* 做T记录 */}
                 {activeTab === 'ttrade' && (
                   <div className="space-y-6">
-                    {/* 添加做T表单 */}
                     <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
                       <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
                         <Activity className="w-5 h-5 text-indigo-600" />
@@ -891,7 +831,7 @@ export default function TradingCalculator() {
                         </div>
                         <div>
                           <label className="text-xs text-slate-500 mb-1 block">
-                            平仓价格 (元) {tForm.direction === 'buy_first' ? '【卖出价】' : '【买回价】'}
+                            平仓价格 (元)
                           </label>
                           <div className="flex gap-2">
                             <input
@@ -900,7 +840,7 @@ export default function TradingCalculator() {
                               value={tForm.closePrice}
                               onChange={(e) => setTForm({...tForm, closePrice: e.target.value})}
                               className="flex-1 px-3 py-2 border border-slate-300 rounded-lg focus:border-indigo-500 outline-none"
-                              placeholder="可选，不填则标记为未平仓"
+                              placeholder="可选"
                             />
                             <button
                               onClick={addTTrade}
@@ -917,7 +857,6 @@ export default function TradingCalculator() {
                       </p>
                     </div>
 
-                    {/* 做T记录列表 */}
                     <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
                       <div className="p-4 bg-slate-50 border-b border-slate-200">
                         <h3 className="font-bold text-slate-800">做T历史记录</h3>
@@ -981,7 +920,6 @@ export default function TradingCalculator() {
                 {/* 策略设置 */}
                 {activeTab === 'strategy' && (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {/* 止盈设置 */}
                     <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
                       <div className="flex items-center justify-between mb-4">
                         <h3 className="font-bold text-slate-800 flex items-center gap-2">
@@ -1087,7 +1025,6 @@ export default function TradingCalculator() {
                       </div>
                     </div>
 
-                    {/* 止损设置 */}
                     <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
                       <div className="flex items-center justify-between mb-4">
                         <h3 className="font-bold text-slate-800 flex items-center gap-2">
