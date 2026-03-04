@@ -21,7 +21,6 @@ import {
 // ==================== 类型定义 ====================
 
 type TradeMode = 'stock' | 'futures';
-type TDirection = 'buy_first' | 'sell_first';
 type FuturesDirection = 'long' | 'short';
 type FuturesAction = 'open' | 'close';
 
@@ -199,7 +198,6 @@ export default function TradingSystem() {
   });
 
   // ===== 期货状态 =====
-  const [futuresActiveTab, setFuturesActiveTab] = useState<'trade' | 'positions' | 'account'>('trade');
   const [futuresPositions, setFuturesPositions] = useState<FuturesPosition[]>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('futures-positions');
@@ -1164,7 +1162,6 @@ export default function TradingSystem() {
                     {futuresPositions.map(pos => {
                       const currentPrice = marketPrices[pos.contract.code] || pos.avgPrice;
                       const floatingProfit = (currentPrice - pos.avgPrice) * pos.contract.multiplier * pos.totalHands * (pos.direction === 'long' ? 1 : -1);
-                      const profitRate = (floatingProfit / pos.occupiedMargin) * 100;
                       const liquidPrice = calculateLiquidationPrice(pos);
 
                       return (
